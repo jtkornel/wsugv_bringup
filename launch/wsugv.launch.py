@@ -20,7 +20,8 @@
 #
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler, TimerAction
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler, TimerAction, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit, OnProcessStart
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -57,6 +58,20 @@ def generate_launch_description():
     )
     declared_arguments.append(
         DeclareLaunchArgument(
+            "rviz",
+            default_value="true",
+            description="Launch the RVIZ gui",
+        )
+    )
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "teleop",
+            default_value="true",
+            description="Launch joystick teleop"
+            )
+    )
+    declared_arguments.append(
+        DeclareLaunchArgument(
             "use_mock_hardware",
             default_value="true",
             description="Start robot with mock hardware mirroring command to its states.",
@@ -77,6 +92,8 @@ def generate_launch_description():
     prefix = LaunchConfiguration("prefix")
     use_mock_hardware = LaunchConfiguration("use_mock_hardware")
     mock_sensor_commands = LaunchConfiguration("mock_sensor_commands")
+    launch_rviz = LaunchConfiguration("rviz")
+    launch_teleop = LaunchConfiguration("teleop")
 
     # Get URDF via xacro
     robot_description_content = Command(
@@ -111,18 +128,41 @@ def generate_launch_description():
         output="both",
         parameters=[robot_description],
     )
+    ws_ugv_node = Node(
+        package="ws_ugv_protocol",
+        executable="ws_ugv_protocol",
+        name="ws_ugv_communication_protocol",
+        output="both"
+    )
+    
+    lidar_launch_file = PathJoinSubstitution([FindPackageShare("sllidar_ros2"), "launch", "sllidar_a1_launch.py"])
+    lidar_launch = IncludeLaunchDescription(lidar_launch_file)
+
+    teleop_launch_file = PathJoinSubstitution([FindPackageShare("teleop_twist_joy"), "launch", "teleop-launch.py"])
+    teleop_config_file = PathJoinSubstitution([FindPackageShare("wsugv_bringup"), "launch", "teleop_joy.yaml"])
+    teleop_launch = IncludeLaunchDescription(teleop_launch_file,
+                                             condition=IfCondition(launch_teleop),
+                                             launch_arguments={ "config_filepath": teleop_config_file }.items())
+
+
     rviz_node = Node(
         package="rviz2",
         executable="rviz2",
+        condition=IfCondition(launch_rviz),
         name="rviz2",
         output="log",
         arguments=["-d", rviz_config_file],
     )
 
+    launch_actions =  [
+            robot_state_pub_node,
+            ws_ugv_node,
+            lidar_launch,
+            teleop_launch,
+            rviz_node
+        ]    
+
     return LaunchDescription(
         declared_arguments
-        + [
-            robot_state_pub_node,
-            rviz_node,
-        ]
+        + launch_actions
     )
